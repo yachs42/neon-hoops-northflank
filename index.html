@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NEON HOOPS 7.5 — DIRECT ONLINE</title>
+<title>NEON HOOPS 7.6 — DIRECT ONLINE</title>
 <style>
 :root{color-scheme:dark;--ink:#e9faff;--muted:#8eabc4;--pink:#ff568a;--cyan:#42e9f5;--bg:#080e21}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0%,#202950 0,#0a1024 58%,#060a16 100%);color:var(--ink);font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;display:flex;align-items:center;justify-content:center;padding:18px;overflow-x:hidden}
@@ -28,7 +28,7 @@ canvas{width:100%;height:100%;image-rendering:pixelated;display:block}.gameUI{po
 </head>
 <body>
 <main class="shell">
- <header class="brandbar"><div><b>★</b> ARCADE / NEON HOOPS</div><div class="right"><span class="dot"></span> SOLO / ONLINE · v7.5</div></header>
+ <header class="brandbar"><div><b>★</b> ARCADE / NEON HOOPS</div><div class="right"><span class="dot"></span> SOLO / ONLINE · v7.6</div></header>
  <div class="frame" id="frame">
   <canvas id="game" width="480" height="270" aria-label="Пиксельный баскетбол"></canvas>
   <div class="hud hidden" id="hud"><div class="score"><span class="num left" id="scoreL">0</span><div class="versus"><strong>VS</strong>ДО 5 ОЧКОВ</div><span class="num right" id="scoreR">0</span></div></div>
@@ -59,11 +59,11 @@ canvas{width:100%;height:100%;image-rendering:pixelated;display:block}.gameUI{po
   <section class="gameUI hidden" id="onlineScreen"><div class="panel"><h2>ОНЛАЙН 1 НА 1</h2>
     <p class="netStatus" id="onlineStatus">Создай комнату или введи код друга.</p>
     <div id="onlineControls">
-      <div class="netField"><label for="serverInput">Адрес общего сервера</label><input class="netInput" id="serverInput" type="text" spellcheck="false" autocomplete="off" placeholder="https://адрес-вебсокет-сервера"></div><p id="serverInfo"></p>
-      <div class="netRow"><button class="btn" id="probeServerBtn">⌁ ПРОВЕРИТЬ СВЯЗЬ</button><button class="btn primary" id="createRoomBtn">+ СОЗДАТЬ КОМНАТУ</button></div>
+      <div class="netField hidden"><label for="serverInput">Адрес сервера</label><input class="netInput" id="serverInput" type="text" value="p2p://peerjs" readonly></div><p id="serverInfo"></p>
+      <div class="netRow"><button class="btn" id="probeServerBtn">⌁ ПРОВЕРИТЬ P2P</button><button class="btn primary" id="createRoomBtn">+ СОЗДАТЬ КОМНАТУ</button></div>
       <div class="netRow"><input class="netInput room" id="joinCode" placeholder="КОД" maxlength="6" spellcheck="false" autocomplete="off"><button class="btn" id="joinRoomBtn">ВОЙТИ ПО КОДУ</button></div>
     </div>
-    <div id="inviteBox" class="inviteBox hidden"><div class="field-title">Код комнаты</div><div class="inviteCode" id="inviteCode">ABC123</div><div class="netField"><input class="netInput" id="inviteUrl" readonly aria-label="Ссылка для друга"></div><div class="netRow"><button class="btn" id="copyInviteBtn">КОПИРОВАТЬ ССЫЛКУ</button></div><p class="netHint">Друг должен открыть этот адрес и ввести код. Онлайн работает, когда оба подключены к одному серверу.</p></div>
+    <div id="inviteBox" class="inviteBox hidden"><div class="field-title">Код комнаты</div><div class="inviteCode" id="inviteCode">ABC123</div><div class="netField"><input class="netInput" id="inviteUrl" readonly aria-label="Ссылка для друга"></div><div class="netRow"><button class="btn" id="copyInviteBtn">КОПИРОВАТЬ ССЫЛКУ</button></div><p class="netHint">Отправь ссылку другу. Браузеры соединяются напрямую через WebRTC. Если сеть блокирует P2P, соединение может не установиться.</p></div>
     <div class="actions"><button class="btn" id="onlineBackBtn">← В МЕНЮ</button></div>
   </div></section>
   <section class="gameUI pausedOverlay hidden" id="pauseScreen"><div class="panel" id="pausePanel"><h2>ПАУЗА</h2><div class="actions"><button class="btn primary" id="resumeBtn">▶ ПРОДОЛЖИТЬ</button><button class="btn" id="menuFromPause">⌂ В МЕНЮ</button></div></div></section>
@@ -72,6 +72,7 @@ canvas{width:100%;height:100%;image-rendering:pixelated;display:block}.gameUI{po
  <div class="controlStrip" style="grid-template-columns:1fr"><div class="controlCard"><h3>УПРАВЛЕНИЕ</h3><p id="controlSummary"></p></div></div>
  <div class="footer"><span>ESC — ПАУЗА (СОЛО)</span><button id="footerMute">♫ Звук включён</button></div>
 </main>
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js'"></script>
 <script>
 (()=>{'use strict';
 const canvas=document.getElementById('game');let ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=false;
@@ -307,6 +308,146 @@ function reconcileGuest(p,ack){
  }
 }
 
+// GitHub Pages-compatible P2P networking. PeerJS Cloud is used only to introduce
+// the browsers; physics and snapshots are transmitted via WebRTC DataChannel.
+// No Node.js game server is necessary. STUN-only P2P is not guaranteed behind
+// restrictive NAT/firewalls; a TURN relay would be required in those cases.
+const P2P_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+function newP2PCode(){
+ const a=new Uint8Array(6);crypto.getRandomValues(a);
+ return Array.from(a,n=>P2P_ALPHABET[n%P2P_ALPHABET.length]).join('');
+}
+class P2PSocket{
+ constructor(mode,code){
+  this.mode=mode;this.code=code||newP2PCode();this.peer=null;this.conn=null;
+  this.readyState=WebSocket.CONNECTING;this.onopen=null;this.onmessage=null;
+  this.onerror=null;this.onclose=null;this.closed=false;
+  this.rematchHost=false;this.rematchGuest=false;this.guestLeft=false;
+  this.timeout=setTimeout(()=>{
+   if(this.readyState===WebSocket.CONNECTING)this._fail('Не получилось подключиться к PeerJS. Возможно, сервер знакомства недоступен без VPN.');
+  },13000);
+  if(typeof window.Peer!=='function'){
+   queueMicrotask(()=>this._fail('Библиотека PeerJS не загрузилась. Проверь доступ к unpkg.com или jsdelivr.net.'));return;
+  }
+  try{
+   this.peer=new window.Peer(mode==='create'?'neonhoops-'+this.code.toLowerCase():undefined,{
+    debug:0, config:{iceServers:[
+     {urls:'stun:stun.l.google.com:19302'},
+     {urls:'stun:stun1.l.google.com:19302'}
+    ]}
+   });
+   this.peer.on('open',()=>{
+    if(this.closed)return;
+    if(this.mode==='create')this._opened();
+    else{
+     const conn=this.peer.connect('neonhoops-'+this.code.toLowerCase(),{reliable:true,serialization:'json'});
+     this.conn=conn;this._bindConn(conn,true);
+    }
+   });
+   this.peer.on('connection',conn=>{
+    if(this.closed||this.mode!=='create'||(this.conn&&this.conn.open)){
+     try{conn.close()}catch{}return;
+    }
+    this.conn=conn;this.guestLeft=false;this._bindConn(conn,false);
+   });
+   this.peer.on('error',err=>{
+    if(this.closed)return;
+    const t=String(err?.type||err?.message||'network');
+    if(t==='unavailable-id')this._fail('Такой код комнаты занят. Нажми «Создать комнату» ещё раз.');
+    else if(this.mode!=='create'||this.readyState===WebSocket.CONNECTING)
+     this._fail(t==='peer-unavailable'?'Комната не найдена. Проверь код или доступ к сети.':'Ошибка P2P: '+t);
+   });
+  }catch(e){queueMicrotask(()=>this._fail('Не удалось начать WebRTC: '+e.message));}
+ }
+ get bufferedAmount(){return this.conn?.dataChannel?.bufferedAmount||0;}
+ _opened(){if(this.closed)return;clearTimeout(this.timeout);this.readyState=WebSocket.OPEN;this.onopen?.({});}
+ _emit(msg){if(this.closed)return;queueMicrotask(()=>{if(!this.closed)this.onmessage?.({data:JSON.stringify(msg)})});}
+ _sendGuest(msg){if(this.conn?.open){try{this.conn.send(msg);return true}catch{}}return false;}
+ _bindConn(conn,isGuest){
+  const timer=setTimeout(()=>{
+   if(!conn.open&&!this.closed){if(isGuest)this._fail('WebRTC не установился. Возможно, NAT или провайдер блокирует прямое соединение.');else{try{conn.close()}catch{}}}
+  },16000);
+  conn.on('open',()=>{clearTimeout(timer);if(this.closed){conn.close();return}if(isGuest)this._opened();});
+  conn.on('data',msg=>{
+   if(this.closed||!msg||typeof msg!=='object'||typeof msg.type!=='string')return;
+   if(isGuest)this._emit(msg);else this._receiveFromGuest(msg);
+  });
+  conn.on('close',()=>{
+   clearTimeout(timer);if(this.closed)return;
+   if(isGuest){this._fail('P2P-соединение разорвано.');}
+   else{
+    if(this.conn===conn)this.conn=null;
+    this.rematchHost=this.rematchGuest=false;
+    if(!this.guestLeft)this._emit({type:'peer_disconnected'});
+    this.guestLeft=false;
+   }
+  });
+  conn.on('error',err=>{clearTimeout(timer);if(isGuest&&!this.closed)this._fail('Ошибка канала: '+(err?.message||'сеть'));});
+ }
+ _receiveFromGuest(msg){
+  switch(msg.type){
+   case 'join':
+    if(msg.code!==this.code){this._sendGuest({type:'error',fatal:true,message:'Код комнаты не совпадает.'});return;}
+    this.rematchHost=this.rematchGuest=false;
+    this._sendGuest({type:'joined',code:this.code,player:1,token:'p2p-guest'});
+    this._sendGuest({type:'start'});
+    this._emit({type:'start'});
+    break;
+   case 'resume':
+    if(msg.code!==this.code){this._sendGuest({type:'error',fatal:true,message:'Неверная комната.'});return;}
+    this._sendGuest({type:'resumed',code:this.code,player:1,token:'p2p-guest',active:true});
+    this._emit({type:'peer_reconnected'});
+    this._emit({type:'resync_request'});
+    break;
+   case 'ping':this._sendGuest({type:'pong',t:msg.t});break;
+   case 'leave':
+    this.guestLeft=true;this._emit({type:'peer_left'});
+    try{this.conn?.close()}catch{}
+    break;
+   case 'rematch':
+    this.rematchGuest=true;this._tryRematch();
+    break;
+   case 'input':this._emit(msg);break;
+   default:break;
+  }
+ }
+ _tryRematch(){
+  if(this.rematchHost&&this.rematchGuest){
+   this.rematchHost=this.rematchGuest=false;
+   this._sendGuest({type:'start'});this._emit({type:'start'});
+  }else if(this.rematchGuest)this._emit({type:'rematch_offer'});
+  else if(this.rematchHost)this._sendGuest({type:'rematch_offer'});
+ }
+ send(str){
+  if(this.readyState!==WebSocket.OPEN)throw new Error('P2P-канал не открыт');
+  const msg=JSON.parse(str);
+  if(this.mode==='create'){
+   switch(msg.type){
+    case 'create':this._emit({type:'created',code:this.code,player:0,token:'p2p-host'});break;
+    case 'ping':this._emit({type:'pong',t:msg.t});break;
+    case 'rematch':this.rematchHost=true;this._tryRematch();break;
+    case 'leave':this._sendGuest({type:'host_left'});break;
+    default:this._sendGuest(msg);break;
+   }
+  }else if(!this._sendGuest(msg))throw new Error('Нет соединения с создателем комнаты');
+ }
+ _fail(message){
+  if(this.closed)return;
+  this.onerror?.({message});
+  if(message)netText(message);
+  this._close(1006);
+ }
+ _close(code){
+  if(this.closed)return;
+  this.closed=true;this.readyState=WebSocket.CLOSED;
+  clearTimeout(this.timeout);
+  try{this.conn?.close()}catch{}
+  try{this.peer?.destroy()}catch{}
+  this.onclose?.({code});
+ }
+ close(){this._close(1000);}
+}
+
 function netSend(msg){
  const sock=net.socket;
  if(!sock||sock.readyState!==WebSocket.OPEN)return false;
@@ -321,10 +462,10 @@ function netVisibility(){
  $('roomHud').classList.toggle('hidden',!active);
  $('connectionAlert').classList.toggle('hidden',!active||!net.suspended);
  if(active){
-  const info=net.rtt?' · СЕРВЕР '+Math.round(net.rtt)+' мс':'';
+  const info=net.rtt?' · P2P '+Math.round(net.rtt)+' мс':'';
   const inputInfo=net.role==='guest'&&net.inputRtt?' · КОМАНДЫ '+Math.round(net.inputRtt)+' мс':'';
   const fpsInfo=net.role==='guest'&&renderFps?' · FPS '+renderFps:'';
-  $('roomHud').textContent='ОНЛАЙН · '+net.code+' · '+(net.role==='host'?'P1':'P2')+info+inputInfo+fpsInfo;
+  $('roomHud').textContent='P2P · '+net.code+' · '+(net.role==='host'?'P1':'P2')+info+inputInfo+fpsInfo;
  }
 }
 function closeOnline(){
@@ -342,47 +483,23 @@ function closeOnline(){
 function showOnline(){
  closeOnline();phase='lobby';ui.menu.classList.add('hidden');ui.pause.classList.add('hidden');ui.end.classList.add('hidden');ui.hud.classList.add('hidden');ui.btns.classList.add('hidden');ui.online.classList.remove('hidden');
  $('onlineControls').classList.remove('hidden');$('inviteBox').classList.add('hidden');
- const saved=new URLSearchParams(window.location.search).get('room');if(saved)$('joinCode').value=saved.toUpperCase().slice(0,6);
- const q=new URLSearchParams(location.search),layero=location.hostname.endsWith('.layero.app');
- let savedServer='';try{savedServer=localStorage.getItem('neon-hoops-server-v1')||'';}catch{}
- // Prefer the full-stack host serving the page. Never silently send a match to Render.
- // An explicit invite ?server= argument or a saved manual choice may override this.
- const candidate=q.get('server')||savedServer;
- const preferred=candidate||((location.protocol==='http:'||location.protocol==='https:')?location.origin:'http://localhost:3000');
- $('serverInput').value=preferred;
- $('serverInfo').textContent=layero?'Layero не предназначен для игровых WebSocket-серверов. Открой полную версию NEON HOOPS на Northflank.':'Сайт и комнаты работают на этом сервере. Перед матчем можно проверить связь без VPN.';
+ const saved=new URLSearchParams(location.search).get('room');if(saved)$('joinCode').value=saved.toUpperCase().slice(0,6);
+ $('serverInput').value='p2p://peerjs';
+ $('serverInfo').textContent='БЕЗ ХОСТИНГА И КАРТЫ · PeerJS помогает найти друга, затем WebRTC передаёт игровые данные напрямую. Не все сети разрешают P2P.';
  netText('Создай комнату или введи код друга.');keys={};
 }
-function onlineSocketUrl(){
- const raw=$('serverInput').value.trim();let url=new URL(raw);
- if(url.protocol==='http:')url.protocol='ws:';
- else if(url.protocol==='https:')url.protocol='wss:';
- if(!['ws:','wss:'].includes(url.protocol))throw new Error('Нужен адрес http:// или https://');
- url.pathname='/ws';url.search='';url.hash='';return url.toString();
-}
+function onlineSocketUrl(){return 'p2p://peerjs';}
 function probeServer(){
- const button=$('probeServerBtn');if(button.disabled)return;
- let url;try{url=onlineSocketUrl()}catch(e){netText('Неверный адрес: '+e.message);return;}
- button.disabled=true;netText('Проверяем WebSocket без VPN…');
- let socket,done=false;const started=performance.now();
- const finish=(message)=>{if(done)return;done=true;clearTimeout(timer);button.disabled=false;netText(message);try{socket?.close()}catch{}};
- const timer=setTimeout(()=>finish('Нет ответа от игрового сервера за 7 секунд. Проверь адрес, сеть и доступ без VPN.'),7000);
- try{socket=new WebSocket(url)}catch(e){finish('Не удалось открыть WebSocket: '+e.message);return;}
- socket.onopen=()=>{try{socket.send(JSON.stringify({type:'ping',t:Date.now()}))}catch{finish('Соединение открылось, но отправить данные не получилось.')}};
- socket.onmessage=e=>{try{const m=JSON.parse(e.data);if(m.type==='pong')finish('WebSocket работает! Отклик около '+Math.round(performance.now()-started)+' мс (включая соединение). Можно играть без VPN.')}catch{}};
- socket.onerror=()=>finish('Ошибка WebSocket. Сервер или сеть не пропускают соединение.');
- socket.onclose=()=>finish('Соединение закрыто (1006). Проверь, поддерживает ли хостинг WebSocket и доступен ли он без VPN.');
+ const b=$('probeServerBtn');if(b.disabled)return;
+ if(typeof window.Peer!=='function')return netText('PeerJS не загрузился. Возможно, CDN недоступен в этой сети.');
+ b.disabled=true;netText('Проверяем сервер знакомства PeerJS…');
+ const start=performance.now();let done=false,peer;
+ const finish=msg=>{if(done)return;done=true;b.disabled=false;clearTimeout(timer);try{peer?.destroy()}catch{};netText(msg)};
+ const timer=setTimeout(()=>finish('Нет ответа от PeerJS. Попробуй другую сеть или браузер.'),9000);
+ try{peer=new window.Peer();peer.on('open',()=>finish('Сервер знакомства доступен ('+Math.round(performance.now()-start)+' мс). Прямой P2P-канал можно проверить только вдвоём.'));peer.on('error',e=>finish('Не удалось подключиться к PeerJS: '+(e?.type||'сеть')))}catch(e){finish('Ошибка WebRTC: '+e.message)}
 }
 function inviteLink(){
- // Share the same website as the host; if the server was manually overridden,
- // carry that address in the invitation so both players connect to one backend.
- const page=(location.protocol==='http:'||location.protocol==='https:')?location.origin:$('serverInput').value.trim();
- const u=new URL(page);if(u.protocol==='ws:')u.protocol='http:';if(u.protocol==='wss:')u.protocol='https:';
- u.pathname='/';u.search='';u.searchParams.set('room',net.code);
- const backend=$('serverInput').value.trim();const remote=new URL(backend);
- if(remote.protocol==='ws:')remote.protocol='http:';if(remote.protocol==='wss:')remote.protocol='https:';
- if(remote.origin!==u.origin)u.searchParams.set('server',remote.origin);
- u.hash='';return u.toString();
+ const url=new URL(location.href);url.search='';url.hash='';url.searchParams.set('room',net.code);return url.toString();
 }
 function showMatchUI(){
  ui.menu.classList.add('hidden');ui.online.classList.add('hidden');ui.pause.classList.add('hidden');
@@ -412,7 +529,7 @@ function scheduleReconnect(){
 }
 function openNetSocket(mode,epoch){
  if(epoch!==net.epoch)return;
- let sock;try{sock=new WebSocket(net.serverUrl)}catch{scheduleReconnect();return}
+ let sock;try{sock=new P2PSocket(mode,mode==='create'?newP2PCode():net.code||$('joinCode').value.trim().toUpperCase())}catch{scheduleReconnect();return}
  net.socket=sock;
  const unlock=()=>{$('createRoomBtn').disabled=false;$('joinRoomBtn').disabled=false;};
  sock.onopen=()=>{
@@ -423,13 +540,13 @@ function openNetSocket(mode,epoch){
  };
  sock.onerror=()=>{
   if(net.socket!==sock)return;
-  if(!net.token)netText('Нет связи с сервером. Проверь адрес и интернет.');
+  if(!net.token)netText('Нет связи с PeerJS. Проверь интернет и доступ к серверу знакомства.');
  };
  sock.onclose=event=>{
   if(net.socket!==sock||epoch!==net.epoch)return;
   net.socket=null;unlock();
   if(net.token){scheduleReconnect();return}
-  revertToLobby(location.hostname.endsWith('.layero.app')&&new URL(net.serverUrl).hostname.endsWith('.layero.app')?'Layero не предназначен для игровых комнат. Открой NEON HOOPS на Northflank, где работает WebSocket. (1006)':'Не удалось подключиться. Проверь адрес WebSocket-сервера. ('+event.code+')');
+  revertToLobby('Не удалось подключиться по P2P. Проверь код комнаты, доступ к PeerJS или ограничения сети. ('+event.code+')');
  };
  sock.onmessage=e=>{
   if(net.socket!==sock||epoch!==net.epoch)return;
@@ -495,11 +612,11 @@ function openNetSocket(mode,epoch){
 function startOnlineConnect(type){
  const code=$('joinCode').value.trim().toUpperCase();
  if(type==='join'&&!/^[A-HJ-NP-Z2-9]{6}$/.test(code)){netText('Введите шестизначный код комнаты.');return}
- let url;try{url=onlineSocketUrl()}catch(e){netText('Неверный адрес: '+e.message);return}
+ let url;try{url=onlineSocketUrl()}catch(e){netText('Ошибка P2P: '+e.message);return}
  try{localStorage.setItem('neon-hoops-server-v1',$('serverInput').value.trim());}catch{}
  closeOnline();net.epoch++;net.serverUrl=url;
  $('createRoomBtn').disabled=true;$('joinRoomBtn').disabled=true;
- netText('Подключение к серверу…');openNetSocket(type,net.epoch);
+ netText('Устанавливаем P2P-соединение…');openNetSocket(type,net.epoch);
 }
 function remoteInput(msg){
  const action=controls(msg.code);if(!action)return;
