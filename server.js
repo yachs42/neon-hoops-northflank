@@ -1,5 +1,5 @@
 'use strict';
-// NEON HOOPS: low-latency room server with temporary disconnect recovery.
+// NEON HOOPS v7.8: low-latency WebSocket relay with recovery and stale-frame shedding.
 // The host browser owns game physics. This service relays inputs and small snapshots.
 const http = require('node:http');
 const fs = require('node:fs');
@@ -14,7 +14,7 @@ const HEARTBEAT_MS = Number(process.env.HEARTBEAT_MS) || 15000;
 const PEER_TIMEOUT_MS = Number(process.env.PEER_TIMEOUT_MS) || 50000;
 const MAX_PAYLOAD = 150 * 1024;
 const MAX_BUFFER = 350 * 1024;
-const MAX_SNAPSHOT_BACKLOG = 48 * 1024;
+const MAX_SNAPSHOT_BACKLOG = 12 * 1024;
 const rooms = new Map();
 const peers = new Set();
 const SAFE_INPUTS = new Set(['Space','KeyA','KeyD','ArrowLeft','ArrowRight','ShiftLeft','ShiftRight','KeyQ','KeyW']);
@@ -26,7 +26,7 @@ function respond(res,status,body,contentType){res.writeHead(status,{'Content-Typ
 const httpServer=http.createServer((req,res)=>{
  let url;try{url=new URL(req.url,'http://localhost')}catch{return respond(res,400,'Bad request','text/plain')}
  if(req.method==='GET'&&(url.pathname==='/'||url.pathname==='/index.html'))return respond(res,200,gameHtml,'text/html; charset=utf-8');
- if(req.method==='GET'&&url.pathname==='/health')return respond(res,200,JSON.stringify({ok:true,app:'NEON HOOPS',version:'7.5',websocket:true,rooms:rooms.size}), 'application/json');
+ if(req.method==='GET'&&url.pathname==='/health')return respond(res,200,JSON.stringify({ok:true,rooms:rooms.size}), 'application/json');
  return respond(res,404,'Not found','text/plain; charset=utf-8');
 });
 function sendFrame(peer,opcode,data=Buffer.alloc(0),droppable=false){

@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>NEON HOOPS 7.6 — DIRECT ONLINE</title>
+<title>NEON HOOPS 7.8 — LOW LATENCY</title>
 <style>
 :root{color-scheme:dark;--ink:#e9faff;--muted:#8eabc4;--pink:#ff568a;--cyan:#42e9f5;--bg:#080e21}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(ellipse at 50% 0%,#202950 0,#0a1024 58%,#060a16 100%);color:var(--ink);font-family:ui-monospace,SFMono-Regular,Consolas,'Liberation Mono',monospace;display:flex;align-items:center;justify-content:center;padding:18px;overflow-x:hidden}
@@ -28,7 +28,7 @@ canvas{width:100%;height:100%;image-rendering:pixelated;display:block}.gameUI{po
 </head>
 <body>
 <main class="shell">
- <header class="brandbar"><div><b>★</b> ARCADE / NEON HOOPS</div><div class="right"><span class="dot"></span> SOLO / ONLINE · v7.6</div></header>
+ <header class="brandbar"><div><b>★</b> ARCADE / NEON HOOPS</div><div class="right"><span class="dot"></span> SOLO / ONLINE · v7.8 · FAST RENDER</div></header>
  <div class="frame" id="frame">
   <canvas id="game" width="480" height="270" aria-label="Пиксельный баскетбол"></canvas>
   <div class="hud hidden" id="hud"><div class="score"><span class="num left" id="scoreL">0</span><div class="versus"><strong>VS</strong>ДО 5 ОЧКОВ</div><span class="num right" id="scoreR">0</span></div></div>
@@ -59,11 +59,11 @@ canvas{width:100%;height:100%;image-rendering:pixelated;display:block}.gameUI{po
   <section class="gameUI hidden" id="onlineScreen"><div class="panel"><h2>ОНЛАЙН 1 НА 1</h2>
     <p class="netStatus" id="onlineStatus">Создай комнату или введи код друга.</p>
     <div id="onlineControls">
-      <div class="netField hidden"><label for="serverInput">Адрес сервера</label><input class="netInput" id="serverInput" type="text" value="p2p://peerjs" readonly></div><p id="serverInfo"></p>
-      <div class="netRow"><button class="btn" id="probeServerBtn">⌁ ПРОВЕРИТЬ P2P</button><button class="btn primary" id="createRoomBtn">+ СОЗДАТЬ КОМНАТУ</button></div>
+      <div class="netField"><label for="serverInput">Адрес общего сервера</label><input class="netInput" id="serverInput" type="text" spellcheck="false" autocomplete="off" placeholder="https://адрес-вебсокет-сервера"></div><p id="serverInfo"></p>
+      <div class="netRow"><button class="btn primary" id="createRoomBtn">+ СОЗДАТЬ КОМНАТУ</button></div>
       <div class="netRow"><input class="netInput room" id="joinCode" placeholder="КОД" maxlength="6" spellcheck="false" autocomplete="off"><button class="btn" id="joinRoomBtn">ВОЙТИ ПО КОДУ</button></div>
     </div>
-    <div id="inviteBox" class="inviteBox hidden"><div class="field-title">Код комнаты</div><div class="inviteCode" id="inviteCode">ABC123</div><div class="netField"><input class="netInput" id="inviteUrl" readonly aria-label="Ссылка для друга"></div><div class="netRow"><button class="btn" id="copyInviteBtn">КОПИРОВАТЬ ССЫЛКУ</button></div><p class="netHint">Отправь ссылку другу. Браузеры соединяются напрямую через WebRTC. Если сеть блокирует P2P, соединение может не установиться.</p></div>
+    <div id="inviteBox" class="inviteBox hidden"><div class="field-title">Код комнаты</div><div class="inviteCode" id="inviteCode">ABC123</div><div class="netField"><input class="netInput" id="inviteUrl" readonly aria-label="Ссылка для друга"></div><div class="netRow"><button class="btn" id="copyInviteBtn">КОПИРОВАТЬ ССЫЛКУ</button></div><p class="netHint">Друг должен открыть этот адрес и ввести код. Онлайн работает, когда оба подключены к одному серверу.</p></div>
     <div class="actions"><button class="btn" id="onlineBackBtn">← В МЕНЮ</button></div>
   </div></section>
   <section class="gameUI pausedOverlay hidden" id="pauseScreen"><div class="panel" id="pausePanel"><h2>ПАУЗА</h2><div class="actions"><button class="btn primary" id="resumeBtn">▶ ПРОДОЛЖИТЬ</button><button class="btn" id="menuFromPause">⌂ В МЕНЮ</button></div></div></section>
@@ -72,7 +72,6 @@ canvas{width:100%;height:100%;image-rendering:pixelated;display:block}.gameUI{po
  <div class="controlStrip" style="grid-template-columns:1fr"><div class="controlCard"><h3>УПРАВЛЕНИЕ</h3><p id="controlSummary"></p></div></div>
  <div class="footer"><span>ESC — ПАУЗА (СОЛО)</span><button id="footerMute">♫ Звук включён</button></div>
 </main>
-<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js'"></script>
 <script>
 (()=>{'use strict';
 const canvas=document.getElementById('game');let ctx=canvas.getContext('2d');ctx.imageSmoothingEnabled=false;
@@ -153,15 +152,16 @@ window.addEventListener('keydown',event=>{
 },true);
 // Online: authoritative host, lightweight snapshots, reconnection and ping display.
 const net={socket:null,role:null,active:false,code:'',token:'',serverUrl:'',lastSnapshotAt:0,lastPhase:'',lastSeq:-1,
- reconnectTimer:null,reconnectAttempts:0,reconnectDeadline:0,epoch:0,suspended:false,pingAt:0,rtt:0,inputSeq:0,inputAck:0,inputRtt:0,lastLocalAction:0};
+ reconnectTimer:null,reconnectAttempts:0,reconnectDeadline:0,epoch:0,suspended:false,pingAt:0,rtt:0,inputSeq:0,inputAck:0,inputRtt:0,lastLocalAction:0,fastSnapshot:false,lastFxAt:0};
 let remoteKeys={};
 // Snapshot timeline: smooth other players and the ball independently of packet arrival.
 // Keep guest's own low-latency local prediction unchanged.
-const SMOOTH_DELAY_MS=76, SNAPSHOT_PERIOD_MS=34;
+// 60 Hz when the host renders at 60 FPS, with a smaller jitter buffer.
+const SMOOTH_DELAY_MS=24, SNAPSHOT_PERIOD_MS=15, COSMETIC_PERIOD_MS=75;
 let visualHistory=[],visualOffset=NaN,visualJitter=0,visualLastArrival=0,visualPhase='';
 let renderFps=0,fpsSamples=0,fpsLastUpdate=0;
-let backgroundCache=null;
-function clearVisualHistory(){visualHistory=[];visualOffset=NaN;visualJitter=0;visualLastArrival=0;visualPhase='';}
+let backgroundCache=null,guestTrails=[];
+function clearVisualHistory(){visualHistory=[];visualOffset=NaN;visualJitter=0;visualLastArrival=0;visualPhase='';guestTrails=[];}
 function storeVisualSnapshot(s){
  if(!Number.isFinite(s.seq)||!Array.isArray(s.players)||s.players.length<2)return;
  const now=performance.now(),arrivalGap=visualLastArrival?now-visualLastArrival:SNAPSHOT_PERIOD_MS;
@@ -182,12 +182,47 @@ function storeVisualSnapshot(s){
  if(visualHistory.length>14)visualHistory.shift();
 }
 function between(a,b,t){return a+(b-a)*t;}
+
+// The ball is held at the drawn hand rather than above the character's head.
+function heldBallAtHand(p){
+ const f=p.facing||1;
+ const sway=Math.sin((p.anim||0)*.18)*Math.min(2,Math.abs(p.vx||0));
+ const t=p.dunk?clamp(p.dunk.progress/p.dunk.duration,0,1):0;
+ const hanging=p.finishDunk?.variant==='hang'&&p.finishDunk.frame<=30;
+ if(p.dunk||hanging){
+  if(p.dunk?.variant==='spin'&&t>.30&&t<.82){
+   const a=(t-.30)/.52*Math.PI*2;
+   return {x:p.x+f*(8+Math.sin(a)*8),y:p.y-17-Math.cos(a)*10};
+  }
+  const extend=hanging?1:ease(clamp((t-.20)/.47,0,1));
+  return {x:p.x+f*(4+extend*4),y:p.y-1-extend*23};
+ }
+ if(p.charging||p.shotPose>0){
+  const charge=p.charging?ease(clamp(p.charge/45,0,1)):0;
+  const follow=p.shotPose>0?Math.min(ease((20-p.shotPose)/4),ease(p.shotPose/9)):0;
+  const h=ease(Math.max(charge,follow));
+  return {x:p.x+f*7,y:p.y+9-h*31};
+ }
+ return {x:p.x+f*10,y:p.y+10-sway+Math.sin(clock*.32)*.5};
+}
+// Guest rebuilds the trail from the actually displayed interpolated ball.
+// Host's historical trail is time-shifted relative to the displayed ball and looks glitchy.
+function tickGuestTrails(displayBall){
+ for(const t of guestTrails)t.t--;
+ guestTrails=guestTrails.filter(t=>t.t>0);
+ if(!displayBall||displayBall.owner>=0){guestTrails=[];return;}
+ const last=guestTrails[guestTrails.length-1];
+ if(!last||Math.hypot(displayBall.x-last.x,displayBall.y-last.y)>1.5){
+  guestTrails.push({x:displayBall.x,y:displayBall.y,t:12});
+  if(guestTrails.length>10)guestTrails.shift();
+ }
+}
 function sampleVisual(now){
  if(!visualHistory.length)return null;
  const history=visualHistory;
  if(history.length===1)return {p:history[0].p,b:history[0].b};
  // A modest adaptive jitter buffer avoids packet-to-packet jumps under VPN.
- const target=now-visualOffset-SMOOTH_DELAY_MS-Math.min(35,visualJitter*.8);
+ const target=now-visualOffset-SMOOTH_DELAY_MS-Math.min(30,visualJitter*.7);
  let a=history[0],b=history[1],factor=0;
  if(target<=a.t)return {p:a.p,b:a.b};
  for(let i=1;i<history.length;i++){
@@ -195,7 +230,7 @@ function sampleVisual(now){
    if(target<=b.t){factor=Math.max(0,Math.min(1,(target-a.t)/Math.max(1,b.t-a.t)));break;}
    if(i===history.length-1){
      // Very short bounded extrapolation hides single late/lost snapshots.
-     factor=1+Math.min(48,Math.max(0,target-b.t))/Math.max(1,b.t-a.t);
+     factor=1+Math.min(35,Math.max(0,target-b.t))/Math.max(1,b.t-a.t);
    }
  }
  const pose={...b.p};
@@ -308,146 +343,6 @@ function reconcileGuest(p,ack){
  }
 }
 
-// GitHub Pages-compatible P2P networking. PeerJS Cloud is used only to introduce
-// the browsers; physics and snapshots are transmitted via WebRTC DataChannel.
-// No Node.js game server is necessary. STUN-only P2P is not guaranteed behind
-// restrictive NAT/firewalls; a TURN relay would be required in those cases.
-const P2P_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-function newP2PCode(){
- const a=new Uint8Array(6);crypto.getRandomValues(a);
- return Array.from(a,n=>P2P_ALPHABET[n%P2P_ALPHABET.length]).join('');
-}
-class P2PSocket{
- constructor(mode,code){
-  this.mode=mode;this.code=code||newP2PCode();this.peer=null;this.conn=null;
-  this.readyState=WebSocket.CONNECTING;this.onopen=null;this.onmessage=null;
-  this.onerror=null;this.onclose=null;this.closed=false;
-  this.rematchHost=false;this.rematchGuest=false;this.guestLeft=false;
-  this.timeout=setTimeout(()=>{
-   if(this.readyState===WebSocket.CONNECTING)this._fail('Не получилось подключиться к PeerJS. Возможно, сервер знакомства недоступен без VPN.');
-  },13000);
-  if(typeof window.Peer!=='function'){
-   queueMicrotask(()=>this._fail('Библиотека PeerJS не загрузилась. Проверь доступ к unpkg.com или jsdelivr.net.'));return;
-  }
-  try{
-   this.peer=new window.Peer(mode==='create'?'neonhoops-'+this.code.toLowerCase():undefined,{
-    debug:0, config:{iceServers:[
-     {urls:'stun:stun.l.google.com:19302'},
-     {urls:'stun:stun1.l.google.com:19302'}
-    ]}
-   });
-   this.peer.on('open',()=>{
-    if(this.closed)return;
-    if(this.mode==='create')this._opened();
-    else{
-     const conn=this.peer.connect('neonhoops-'+this.code.toLowerCase(),{reliable:true,serialization:'json'});
-     this.conn=conn;this._bindConn(conn,true);
-    }
-   });
-   this.peer.on('connection',conn=>{
-    if(this.closed||this.mode!=='create'||(this.conn&&this.conn.open)){
-     try{conn.close()}catch{}return;
-    }
-    this.conn=conn;this.guestLeft=false;this._bindConn(conn,false);
-   });
-   this.peer.on('error',err=>{
-    if(this.closed)return;
-    const t=String(err?.type||err?.message||'network');
-    if(t==='unavailable-id')this._fail('Такой код комнаты занят. Нажми «Создать комнату» ещё раз.');
-    else if(this.mode!=='create'||this.readyState===WebSocket.CONNECTING)
-     this._fail(t==='peer-unavailable'?'Комната не найдена. Проверь код или доступ к сети.':'Ошибка P2P: '+t);
-   });
-  }catch(e){queueMicrotask(()=>this._fail('Не удалось начать WebRTC: '+e.message));}
- }
- get bufferedAmount(){return this.conn?.dataChannel?.bufferedAmount||0;}
- _opened(){if(this.closed)return;clearTimeout(this.timeout);this.readyState=WebSocket.OPEN;this.onopen?.({});}
- _emit(msg){if(this.closed)return;queueMicrotask(()=>{if(!this.closed)this.onmessage?.({data:JSON.stringify(msg)})});}
- _sendGuest(msg){if(this.conn?.open){try{this.conn.send(msg);return true}catch{}}return false;}
- _bindConn(conn,isGuest){
-  const timer=setTimeout(()=>{
-   if(!conn.open&&!this.closed){if(isGuest)this._fail('WebRTC не установился. Возможно, NAT или провайдер блокирует прямое соединение.');else{try{conn.close()}catch{}}}
-  },16000);
-  conn.on('open',()=>{clearTimeout(timer);if(this.closed){conn.close();return}if(isGuest)this._opened();});
-  conn.on('data',msg=>{
-   if(this.closed||!msg||typeof msg!=='object'||typeof msg.type!=='string')return;
-   if(isGuest)this._emit(msg);else this._receiveFromGuest(msg);
-  });
-  conn.on('close',()=>{
-   clearTimeout(timer);if(this.closed)return;
-   if(isGuest){this._fail('P2P-соединение разорвано.');}
-   else{
-    if(this.conn===conn)this.conn=null;
-    this.rematchHost=this.rematchGuest=false;
-    if(!this.guestLeft)this._emit({type:'peer_disconnected'});
-    this.guestLeft=false;
-   }
-  });
-  conn.on('error',err=>{clearTimeout(timer);if(isGuest&&!this.closed)this._fail('Ошибка канала: '+(err?.message||'сеть'));});
- }
- _receiveFromGuest(msg){
-  switch(msg.type){
-   case 'join':
-    if(msg.code!==this.code){this._sendGuest({type:'error',fatal:true,message:'Код комнаты не совпадает.'});return;}
-    this.rematchHost=this.rematchGuest=false;
-    this._sendGuest({type:'joined',code:this.code,player:1,token:'p2p-guest'});
-    this._sendGuest({type:'start'});
-    this._emit({type:'start'});
-    break;
-   case 'resume':
-    if(msg.code!==this.code){this._sendGuest({type:'error',fatal:true,message:'Неверная комната.'});return;}
-    this._sendGuest({type:'resumed',code:this.code,player:1,token:'p2p-guest',active:true});
-    this._emit({type:'peer_reconnected'});
-    this._emit({type:'resync_request'});
-    break;
-   case 'ping':this._sendGuest({type:'pong',t:msg.t});break;
-   case 'leave':
-    this.guestLeft=true;this._emit({type:'peer_left'});
-    try{this.conn?.close()}catch{}
-    break;
-   case 'rematch':
-    this.rematchGuest=true;this._tryRematch();
-    break;
-   case 'input':this._emit(msg);break;
-   default:break;
-  }
- }
- _tryRematch(){
-  if(this.rematchHost&&this.rematchGuest){
-   this.rematchHost=this.rematchGuest=false;
-   this._sendGuest({type:'start'});this._emit({type:'start'});
-  }else if(this.rematchGuest)this._emit({type:'rematch_offer'});
-  else if(this.rematchHost)this._sendGuest({type:'rematch_offer'});
- }
- send(str){
-  if(this.readyState!==WebSocket.OPEN)throw new Error('P2P-канал не открыт');
-  const msg=JSON.parse(str);
-  if(this.mode==='create'){
-   switch(msg.type){
-    case 'create':this._emit({type:'created',code:this.code,player:0,token:'p2p-host'});break;
-    case 'ping':this._emit({type:'pong',t:msg.t});break;
-    case 'rematch':this.rematchHost=true;this._tryRematch();break;
-    case 'leave':this._sendGuest({type:'host_left'});break;
-    default:this._sendGuest(msg);break;
-   }
-  }else if(!this._sendGuest(msg))throw new Error('Нет соединения с создателем комнаты');
- }
- _fail(message){
-  if(this.closed)return;
-  this.onerror?.({message});
-  if(message)netText(message);
-  this._close(1006);
- }
- _close(code){
-  if(this.closed)return;
-  this.closed=true;this.readyState=WebSocket.CLOSED;
-  clearTimeout(this.timeout);
-  try{this.conn?.close()}catch{}
-  try{this.peer?.destroy()}catch{}
-  this.onclose?.({code});
- }
- close(){this._close(1000);}
-}
-
 function netSend(msg){
  const sock=net.socket;
  if(!sock||sock.readyState!==WebSocket.OPEN)return false;
@@ -462,10 +357,10 @@ function netVisibility(){
  $('roomHud').classList.toggle('hidden',!active);
  $('connectionAlert').classList.toggle('hidden',!active||!net.suspended);
  if(active){
-  const info=net.rtt?' · P2P '+Math.round(net.rtt)+' мс':'';
+  const info=net.rtt?' · СЕРВЕР '+Math.round(net.rtt)+' мс':'';
   const inputInfo=net.role==='guest'&&net.inputRtt?' · КОМАНДЫ '+Math.round(net.inputRtt)+' мс':'';
   const fpsInfo=net.role==='guest'&&renderFps?' · FPS '+renderFps:'';
-  $('roomHud').textContent='P2P · '+net.code+' · '+(net.role==='host'?'P1':'P2')+info+inputInfo+fpsInfo;
+  $('roomHud').textContent='ОНЛАЙН · '+net.code+' · '+(net.role==='host'?'P1':'P2')+info+inputInfo+fpsInfo;
  }
 }
 function closeOnline(){
@@ -477,29 +372,32 @@ function closeOnline(){
   try{sock.close()}catch{}
  }
  net.socket=null;net.active=false;net.role=null;net.code='';net.token='';net.serverUrl='';net.suspended=false;
- net.reconnectDeadline=0;net.reconnectAttempts=0;net.rtt=0;net.lastSeq=-1;
+ net.reconnectDeadline=0;net.reconnectAttempts=0;net.rtt=0;net.lastSeq=-1;net.fastSnapshot=false;net.lastFxAt=0;
  remoteKeys={};clearVisualHistory();resetPrediction();netVisibility();
 }
 function showOnline(){
  closeOnline();phase='lobby';ui.menu.classList.add('hidden');ui.pause.classList.add('hidden');ui.end.classList.add('hidden');ui.hud.classList.add('hidden');ui.btns.classList.add('hidden');ui.online.classList.remove('hidden');
  $('onlineControls').classList.remove('hidden');$('inviteBox').classList.add('hidden');
- const saved=new URLSearchParams(location.search).get('room');if(saved)$('joinCode').value=saved.toUpperCase().slice(0,6);
- $('serverInput').value='p2p://peerjs';
- $('serverInfo').textContent='БЕЗ ХОСТИНГА И КАРТЫ · PeerJS помогает найти друга, затем WebRTC передаёт игровые данные напрямую. Не все сети разрешают P2P.';
+ const saved=new URLSearchParams(window.location.search).get('room');if(saved)$('joinCode').value=saved.toUpperCase().slice(0,6);
+ const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
+ // Do not remember obsolete Layero/P2P endpoints. Public matchmaking always uses Render.
+ $('serverInput').value=isLocal?location.origin:'https://neon-hoops-online.onrender.com';
+ $('serverInfo').textContent='Комнаты и игровой сервер работают через Render · WebSocket. P2P не используется.';
  netText('Создай комнату или введи код друга.');keys={};
 }
-function onlineSocketUrl(){return 'p2p://peerjs';}
-function probeServer(){
- const b=$('probeServerBtn');if(b.disabled)return;
- if(typeof window.Peer!=='function')return netText('PeerJS не загрузился. Возможно, CDN недоступен в этой сети.');
- b.disabled=true;netText('Проверяем сервер знакомства PeerJS…');
- const start=performance.now();let done=false,peer;
- const finish=msg=>{if(done)return;done=true;b.disabled=false;clearTimeout(timer);try{peer?.destroy()}catch{};netText(msg)};
- const timer=setTimeout(()=>finish('Нет ответа от PeerJS. Попробуй другую сеть или браузер.'),9000);
- try{peer=new window.Peer();peer.on('open',()=>finish('Сервер знакомства доступен ('+Math.round(performance.now()-start)+' мс). Прямой P2P-канал можно проверить только вдвоём.'));peer.on('error',e=>finish('Не удалось подключиться к PeerJS: '+(e?.type||'сеть')))}catch(e){finish('Ошибка WebRTC: '+e.message)}
+function onlineSocketUrl(){
+ const raw=$('serverInput').value.trim();let url=new URL(raw);
+ if(url.protocol==='http:')url.protocol='ws:';
+ else if(url.protocol==='https:')url.protocol='wss:';
+ if(!['ws:','wss:'].includes(url.protocol))throw new Error('Нужен адрес http:// или https://');
+ url.pathname='/ws';url.search='';url.hash='';return url.toString();
 }
 function inviteLink(){
- const url=new URL(location.href);url.search='';url.hash='';url.searchParams.set('room',net.code);return url.toString();
+ // Guests should open the actual Render game, not a former GitHub Pages or Layero shell.
+ const u=new URL($('serverInput').value.trim());
+ if(u.protocol==='ws:')u.protocol='http:';if(u.protocol==='wss:')u.protocol='https:';
+ u.pathname='/';u.search='';u.searchParams.set('room',net.code);u.hash='';
+ return u.toString();
 }
 function showMatchUI(){
  ui.menu.classList.add('hidden');ui.online.classList.add('hidden');ui.pause.classList.add('hidden');
@@ -529,7 +427,7 @@ function scheduleReconnect(){
 }
 function openNetSocket(mode,epoch){
  if(epoch!==net.epoch)return;
- let sock;try{sock=new P2PSocket(mode,mode==='create'?newP2PCode():net.code||$('joinCode').value.trim().toUpperCase())}catch{scheduleReconnect();return}
+ let sock;try{sock=new WebSocket(net.serverUrl)}catch{scheduleReconnect();return}
  net.socket=sock;
  const unlock=()=>{$('createRoomBtn').disabled=false;$('joinRoomBtn').disabled=false;};
  sock.onopen=()=>{
@@ -540,13 +438,13 @@ function openNetSocket(mode,epoch){
  };
  sock.onerror=()=>{
   if(net.socket!==sock)return;
-  if(!net.token)netText('Нет связи с PeerJS. Проверь интернет и доступ к серверу знакомства.');
+  if(!net.token)netText('Нет связи с сервером. Проверь адрес и интернет.');
  };
  sock.onclose=event=>{
   if(net.socket!==sock||epoch!==net.epoch)return;
   net.socket=null;unlock();
   if(net.token){scheduleReconnect();return}
-  revertToLobby('Не удалось подключиться по P2P. Проверь код комнаты, доступ к PeerJS или ограничения сети. ('+event.code+')');
+  revertToLobby('Нет связи с игровым сервером Render ('+event.code+'). Проверь интернет или статус Render.');
  };
  sock.onmessage=e=>{
   if(net.socket!==sock||epoch!==net.epoch)return;
@@ -565,7 +463,7 @@ function openNetSocket(mode,epoch){
   }
   else if(msg.type==='start'){
    net.active=true;net.suspended=false;net.reconnectDeadline=0;net.reconnectAttempts=0;
-   net.lastSnapshotAt=0;net.lastPhase='';net.lastSeq=-1;net.lastRemoteInputSeq=0;
+   net.lastSnapshotAt=0;net.lastFxAt=0;net.fastSnapshot=false;net.lastPhase='';net.lastSeq=-1;net.lastRemoteInputSeq=0;
    remoteKeys={};clearVisualHistory();resetPrediction();
    $('replayBtn').disabled=false;$('replayBtn').textContent='↻ РЕВАНШ';
    start();netVisibility();
@@ -612,11 +510,11 @@ function openNetSocket(mode,epoch){
 function startOnlineConnect(type){
  const code=$('joinCode').value.trim().toUpperCase();
  if(type==='join'&&!/^[A-HJ-NP-Z2-9]{6}$/.test(code)){netText('Введите шестизначный код комнаты.');return}
- let url;try{url=onlineSocketUrl()}catch(e){netText('Ошибка P2P: '+e.message);return}
+ let url;try{url=onlineSocketUrl()}catch(e){netText('Неверный адрес: '+e.message);return}
  try{localStorage.setItem('neon-hoops-server-v1',$('serverInput').value.trim());}catch{}
  closeOnline();net.epoch++;net.serverUrl=url;
  $('createRoomBtn').disabled=true;$('joinRoomBtn').disabled=true;
- netText('Устанавливаем P2P-соединение…');openNetSocket(type,net.epoch);
+ netText('Подключение к серверу…');openNetSocket(type,net.epoch);
 }
 function remoteInput(msg){
  const action=controls(msg.code);if(!action)return;
@@ -624,6 +522,9 @@ function remoteInput(msg){
  const was=!!remoteKeys[msg.code];
  if(msg.down){remoteKeys[msg.code]=true;if(!was)doAction(players[1],action)}
  else{delete remoteKeys[msg.code];if(msg.code==='KeyW')releaseCharge(players[1])}
+ // A new remote command should be acknowledged in the NEXT host physics frame.
+ // Do not wait for the regular network snapshot interval.
+ net.fastSnapshot=true;
 }
 function loadSnapshot(s){
  if(!Array.isArray(s.players)||!s.ball||!Array.isArray(s.points))return;
@@ -633,23 +534,34 @@ function loadSnapshot(s){
  phase=s.phase;clock=s.clock;roundStart=s.roundStart;points=s.points;
  players=s.players;ball=s.ball;
  if(net.role==='guest'){storeVisualSnapshot(s);reconcileGuest(s.players[1],s.inputAck);}
- if(phase==='playing'&&clock-roundStart<34&&guestPred&&Math.abs(guestPred.x-s.players[1].x)>45)guestPred={...s.players[1]};particles=s.particles||[];trails=s.trails||[];waves=s.waves||[];glassFX=s.glassFX;glassShards=s.glassShards||[];flash=s.flash||0;shake=s.shake||0;
+ if(phase==='playing'&&clock-roundStart<34&&guestPred&&Math.abs(guestPred.x-s.players[1].x)>45)guestPred={...s.players[1]};
+ // Physics arrives at up to 60 Hz, visual effects less often to save bandwidth.
+ // Keep animating previous FX between those updates instead of clearing them.
+ if(s.fx){particles=s.fx.particles||[];waves=s.fx.waves||[];glassFX=s.fx.glassFX||null;glassShards=s.fx.glassShards||[];}
+ trails=net.role==='guest'?[]:(s.trails||[]);flash=s.flash||0;shake=s.shake||0;
  $('scoreL').textContent=points[0];$('scoreR').textContent=points[1];
  if(s.toastTimer>0){ui.toast.textContent=s.toast;ui.toast.classList.remove('hidden')}else ui.toast.classList.add('hidden');
  if(phase==='ended'&&was!=='ended')showEndUI();
  else if(phase!=='ended')ui.end.classList.add('hidden');
 }
 function publishSnapshot(force=false){
- if(net.role!=='host'||!net.active||net.socket?.readyState!==WebSocket.OPEN)return;
+ if(net.role!=='host'||!net.active||net.socket?.readyState!==WebSocket.OPEN)return false;
  const now=performance.now(),changed=net.lastPhase!==phase;
- if(!force&&!changed&&now-net.lastSnapshotAt<SNAPSHOT_PERIOD_MS)return; // ~30 Hz, no catch-up bursts.
- if(!force&&!changed&&phase!=='playing'&&phase!=='goal')return;
- if(net.socket.bufferedAmount>28*1024)return; // drop stale frames instead of queuing delay.
+ if(!force&&!changed&&now-net.lastSnapshotAt<SNAPSHOT_PERIOD_MS)return false;
+ if(!force&&!changed&&phase!=='playing'&&phase!=='goal')return false;
+ // Prefer fresh game state over building a backlog of obsolete positions.
+ if(net.socket.bufferedAmount>12*1024)return false;
  const state={seq:Math.floor(now),inputAck:net.lastRemoteInputSeq||0,phase,clock,roundStart,points,
   players:players.map(p=>({...p,ghosts:p.ghosts.slice(-3)})),ball,
-  particles:particles.slice(-12),trails:trails.slice(-9),waves:waves.slice(-4),glassFX,
-  glassShards:glassShards.slice(-16),flash,shake,toastTimer,toast:ui.toast.textContent};
- if(netSend({type:'snapshot',state})){net.lastSnapshotAt=now;net.lastPhase=phase;}
+  flash,shake,toastTimer,toast:ui.toast.textContent};
+ const fxDue=force||changed||!net.lastFxAt||now-net.lastFxAt>=COSMETIC_PERIOD_MS;
+ if(fxDue)state.fx={particles:particles.slice(-12),waves:waves.slice(-4),glassFX,glassShards:glassShards.slice(-16)};
+ if(netSend({type:'snapshot',state})){
+  net.lastSnapshotAt=now;net.lastPhase=phase;
+  if(fxDue)net.lastFxAt=now;
+  return true;
+ }
+ return false;
 }
 function doAction(p,action){
  if(action==='jumpShot'){if(ball.owner===p.team)beginCharge(p);else jumpOnly(p);}
@@ -1114,18 +1026,8 @@ function rimBounce(h){
 }
 function advanceBall(){
  if(ball.owner>=0){
-  const p=players[ball.owner];
-  const raising=p.charging?clamp(.20+p.charge/65,0,.95):0;
-  ball.x=p.x+p.facing*(8+raising*1.5);
-  ball.y=p.dunk?p.y-22+Math.min(4,p.dunk.progress/p.dunk.duration*4):p.y-4-raising*17+Math.sin(clock*.33)*(1-raising)*1.2;
-  if(p.dunk?.variant==='spin'){
-   const u=p.dunk.progress/p.dunk.duration;
-   if(u>.30&&u<.82){
-    const a=(u-.30)/.52*Math.PI*2;
-    ball.x=p.x+p.facing*(8+Math.sin(a)*8);
-    ball.y=p.y-17-Math.cos(a)*10;
-   }
-  }
+  const p=players[ball.owner],hand=heldBallAtHand(p);
+  ball.x=hand.x;ball.y=hand.y;
   ball.netEntry=-1;ball.netEntryAge=0;
   ball.vx=p.vx;ball.vy=p.vy;ball.spin+=.15;return;
  }
@@ -1351,7 +1253,7 @@ function draw(){ctx.save();ctx.clearRect(0,0,W,H);if(shake>0)ctx.translate(rand(
 function loop(now){
  fpsSamples++;if(!fpsLastUpdate)fpsLastUpdate=now;
  if(now-fpsLastUpdate>=1000){renderFps=Math.round(fpsSamples*1000/(now-fpsLastUpdate));fpsSamples=0;fpsLastUpdate=now;if(net.role==='guest'&&net.active)netVisibility();}
- if(net.socket?.readyState===WebSocket.OPEN&&now-net.pingAt>2800){net.pingAt=now;netSend({type:'ping',t:Date.now()})}
+ if(net.socket?.readyState===WebSocket.OPEN&&now-net.pingAt>1700){net.pingAt=now;netSend({type:'ping',t:Date.now()})}
  if(!frameLast)frameLast=now;
  let elapsed=Math.min(90,now-frameLast);frameLast=now;
  if(net.role==='guest'&&net.active){
@@ -1359,13 +1261,22 @@ function loop(now){
   // hundreds of milliseconds. All goals/hits still come from the host.
   accum+=elapsed;let steps=0;
   while(accum>=1000/60&&steps<5){tickPrediction();accum-=1000/60;steps++;}
+  // FX animate at the local render rate, not only when the server sends FX.
+  for(const q of particles){q.x+=q.vx*.85;q.y+=q.vy*.85;q.vy+=.12;q.life--;}
+  particles=particles.filter(q=>q.life>0);
+  for(const a of waves)a.life--;waves=waves.filter(a=>a.life>0);
+  animateGlass();
   if(players.length){
-   const authoritativePlayers=players,authoritativeBall=ball;
+   const authoritativePlayers=players,authoritativeBall=ball,authoritativeTrails=trails;
    const visual=sampleVisual(now);
    players=[visual?visual.p:players[0],guestPred?{...players[1],...guestPred}:players[1]];
    ball=visual?visual.b:ball;
-   if(ball.owner===1&&guestPred){ball={...ball,x:guestPred.x+guestPred.facing*8,y:guestPred.y-6};}
-   try{draw();}finally{players=authoritativePlayers;ball=authoritativeBall;}
+   if(ball.owner===0||ball.owner===1){
+    const p=players[ball.owner];
+    if(p){const hand=heldBallAtHand(p);ball={...ball,x:hand.x,y:hand.y};}
+   }
+   tickGuestTrails(ball);trails=guestTrails;
+   try{draw();}finally{players=authoritativePlayers;ball=authoritativeBall;trails=authoritativeTrails;}
   }else draw();
  }else{
   if(net.active&&net.suspended){accum=0;}
@@ -1373,7 +1284,9 @@ function loop(now){
    accum+=elapsed;let steps=0;
    while(accum>=1000/60&&steps<5){update();accum-=1000/60;steps++}
   }else{clock+=.2;for(const q of particles){q.y+=q.vy*.2;q.life-=.2}particles=particles.filter(q=>q.life>0)}
-  publishSnapshot();draw();
+  const urgent=net.fastSnapshot;
+  if(publishSnapshot(urgent))net.fastSnapshot=false;
+  draw();
  }
  requestAnimationFrame(loop);
 }
@@ -1385,7 +1298,6 @@ $('resetControlsBtn').onclick=()=>{keyBinds={...DEFAULT_BINDS};bindingAction=nul
 for(const b of document.querySelectorAll('[data-bind]'))b.addEventListener('click',()=>{b.blur();bindingAction=b.dataset.bind;$('keyStatus').textContent='Нажми желаемую клавишу. Esc — отмена.';refreshKeyLabels();});
 refreshKeyLabels();
 $('onlineBtn').onclick=showOnline;
-$('probeServerBtn').onclick=probeServer;
 $('createRoomBtn').onclick=()=>startOnlineConnect('create');
 $('joinRoomBtn').onclick=()=>startOnlineConnect('join');
 $('joinCode').addEventListener('keydown',e=>{if(e.key==='Enter')startOnlineConnect('join');});
